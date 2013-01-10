@@ -718,8 +718,10 @@ Evme.DoATAPI = new function Evme_DoATAPI() {
             if (!ignoreCache) {
                 var fromCache = getFromCache(cacheKey);
                 if (fromCache) {
-                    callback && callback(fromCache);
-                    return false;
+                    callback && window.setTimeout(function() {
+                        callback(fromCache);
+                    }, 10);
+                    return true;
                 }
             }
         }
@@ -772,7 +774,8 @@ Evme.DoATAPI = new function Evme_DoATAPI() {
                     requestsToPerformOnOnline.push(_request);
                     
                     Evme.EventHandler.trigger(NAME, "cantSendRequest", {
-                        "request": request,
+                        "method": methodNamespace + '/' + methodName,
+                        "request": _request,
                         "queue": requestsToPerformOnOnline
                     });
                 }

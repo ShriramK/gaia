@@ -558,6 +558,16 @@ Evme.Brain = new function Evme_Brain() {
         this.buttonClick = function buttonClick() {
             Searcher.loadMoreApps();
         };
+        
+        // indication of loading more apps is shown
+        this.show = function AppsMore_show() {
+            Evme.Apps.getElement().classList.add('loading-more');
+        };
+        
+        // indication of loading more apps is hidden
+        this.hide = function AppsMore_hide() {
+            Evme.Apps.getElement().classList.remove('loading-more');
+        };
     };
 
     // modules/Apps/
@@ -597,11 +607,12 @@ Evme.Brain = new function Evme_Brain() {
             var appIcon = Evme.Utils.formatImageData(data.app.getIcon());
             // make it round
             Evme.Utils.getRoundIcon(appIcon, function onIconReady(roundedAppIcon) {
-                // bookmark
+                // bookmark - add to homescreen
                 Evme.Utils.sendToOS(Evme.Utils.OSMessages.APP_INSTALL, {
                     'originUrl': data.app.getFavLink(),
                     'title': data.data.name,
-                    'icon': roundedAppIcon
+                    'icon': roundedAppIcon,
+                    'useAsyncPanZoom': data.app.isExternal()
                 });
                 // display system banner
                 Evme.Banner.show('app-install-success', {
@@ -759,7 +770,8 @@ Evme.Brain = new function Evme_Brain() {
         // continue flow of redirecting to app
         function goToApp(data, delay) {
             !delay && (delay = 0);
-            data["appUrl"] = loadingApp.getLink();
+            data.appUrl = loadingApp.getLink();
+            data.isExternal = loadingApp.isExternal();
 
             Evme.EventHandler.trigger("Core", "redirectedToApp", data);
 
@@ -780,7 +792,8 @@ Evme.Brain = new function Evme_Brain() {
                         "originUrl": data.favUrl,
                         "title": data.name,
                         "icon": roundedAppIcon,
-                        "urlTitle": Evme.Searchbar.getValue()
+                        "urlTitle": Evme.Searchbar.getValue(),
+                        "useAsyncPanZoom": data.isExternal
                     });
                 });
             }
@@ -879,8 +892,8 @@ Evme.Brain = new function Evme_Brain() {
         
         // cancel the current outgoing smart folder requests
         this.cancelRequests = function cancelRequests() {
-            requestSmartFolderApps && requestSmartFolderApps.abort();
-            requestSmartFolderImage && requestSmartFolderImage.abort();
+            requestSmartFolderApps && requestSmartFolderApps.abort && requestSmartFolderApps.abort();
+            requestSmartFolderImage && requestSmartFolderImage.abort && requestSmartFolderImage.abort();
         };
         
         // load the folder's background image
@@ -1237,7 +1250,7 @@ Evme.Brain = new function Evme_Brain() {
             data && data.e.preventDefault();
             data && data.e.stopPropagation();
 
-            requestSuggest && requestSuggest.abort();
+            requestSuggest && requestSuggest.abort && requestSuggest.abort();
             window.setTimeout(Evme.ShortcutsCustomize.Loading.hide, 50);
             isRequesting = false;
         };
@@ -1360,25 +1373,29 @@ Evme.Brain = new function Evme_Brain() {
             Evme.Utils.log("DoATAPI.request " + getRequestUrl(data));
         };
         
-        // trigger message when request fails
-        this.cantSendRequest = function cantSendRequest() {
-            var folder = Brain.SmartFolder.get(),
-                query = Evme.Searchbar.getElement().value || (folder && folder.getQuery()) || '',
-                elTo = folder? Evme.$(".evme-apps", folder.getElement())[0] : Evme.Apps.getList().parentNode,
-                bHasInstalled = folder? folder.hasInstalled() : Evme.Apps.hasInstalled(),
-                textKey = bHasInstalled? 'apps-has-installed' : 'apps';
-                
-            Evme.ConnectionMessage.show(elTo, textKey, { 'query': query });
+        this.cantSendRequest = function cantSendRequest(data) {
+            if (data.method === 'Search/apps'){
+                var folder = Brain.SmartFolder.get(),
+                    query = Evme.Searchbar.getElement().value || (folder && folder.getQuery()) || '',
+                    elTo = folder? Evme.$(".evme-apps ul", folder.getElement())[0] : Evme.Apps.getList(),
+                    bHasInstalled = folder? folder.hasInstalled() : Evme.Apps.hasInstalled(),
+                    textKey = bHasInstalled? 'apps-has-installed' : 'apps';
+                    
+                Evme.ConnectionMessage.show(elTo, textKey, { 'query': query });
+                window.setTimeout(folder?
+                                    folder.refreshScroll :
+                                    Evme.Apps.refreshScroll, 0);
+            }
         };
         
-        // an API callback method had an error
-        this.clientError = function onClientError(data) {
-            Evme.Utils.log('API clientError: ' + data.exception.message);
+        // an API callback method had en error
+        this.clientError = function onAPIClientError(data) {
+            Evme.Utils.log('API Client Error! ' + data.exception.message);
         };
         
-        // the API returned an error!
-        this.error = function onError(data) {
-            Evme.Utils.log('API error: ' + data.method + ': ' + JSON.stringify(data.response));
+        // an API callback method had en error
+        this.error = function onAPIError(data) {
+            Evme.Utils.log('API Server Error! ' + JSON.stringify(data.response));
         };
         
         // construct a valid API url- for debugging purposes
@@ -1575,6 +1592,13 @@ Evme.Brain = new function Evme_Brain() {
         };
 
         function getAppsComplete(data, options) {
+            if (data.errorCode !== Evme.DoATAPI.ERROR_CODES.SUCCESS) {
+                return false;
+            }
+            if (!requestSearch) {
+                return;
+            }
+            
             var _query = options.query,
                 _type = options.type,
                 _source = options.source,
@@ -1585,10 +1609,6 @@ Evme.Brain = new function Evme_Brain() {
                 queryTyped = options.queryTyped, // used for searching for exact results if user stopped typing for X seconds
                 onlyDidYouMean = options.onlyDidYouMean,
                 hasInstalledApps = options.hasInstalledApps;
-
-            if (data.errorCode !== Evme.DoATAPI.ERROR_CODES.SUCCESS) {
-                return false;
-            }
 
             window.clearTimeout(timeoutHideHelper);
 
@@ -1710,7 +1730,7 @@ Evme.Brain = new function Evme_Brain() {
 
             setTimeoutForShowingDefaultImage();
 
-            requestImage && requestImage.abort();
+            requestImage && requestImage.abort && requestImage.abort();
             requestImage = Evme.DoATAPI.bgimage({
                 "query": query,
                 "typeHint": type,
@@ -1725,6 +1745,9 @@ Evme.Brain = new function Evme_Brain() {
 
         function getBackgroundImageComplete(data) {
             if (data.errorCode !== Evme.DoATAPI.ERROR_CODES.SUCCESS) {
+                return;
+            }
+            if (!requestImage) {
                 return;
             }
 
@@ -1800,10 +1823,15 @@ Evme.Brain = new function Evme_Brain() {
                 var items = data.response || [];
                 autocompleteCache[query] = items;
                 getAutocompleteComplete(items, query);
+                requestAutocomplete = null;
             });
         };
 
         function getAutocompleteComplete(items, querySentWith) {
+            if (!requestAutocomplete) {
+                return;
+            }
+            
             window.clearTimeout(timeoutAutocomplete);
             timeoutAutocomplete = window.setTimeout(function onTimeout(){
                 if (Evme.Utils.isKeyboardVisible && !requestSearch) {
@@ -1824,7 +1852,7 @@ Evme.Brain = new function Evme_Brain() {
         };
 
         this.loadMoreApps = function loadMoreApps() {
-            if (hasMoreApps) {
+            if (hasMoreApps && !requestSearch) {
                 Evme.Apps.More.show();
                 Searcher.nextAppsPage(hasMoreApps.query, hasMoreApps.type, hasMoreApps.isExact);
             }
@@ -1953,13 +1981,13 @@ Evme.Brain = new function Evme_Brain() {
                 "source": source
             };
 
-            requestSearch && requestSearch.abort();
+            requestSearch && requestSearch.abort && requestSearch.abort();
             window.clearTimeout(timeoutSearchWhileTyping);
             timeoutSearchWhileTyping = window.setTimeout(function onTimeout(){
                 Searcher.getApps(searchOptions);
             }, TIMEOUT_BEFORE_RUNNING_APPS_SEARCH);
 
-            requestImage && requestImage.abort();
+            requestImage && requestImage.abort && requestImage.abort();
             window.clearTimeout(timeoutSearchImageWhileTyping);
             timeoutSearchImageWhileTyping = window.setTimeout(function onTimeout(){
                 Searcher.getBackgroundImage(searchOptions);
@@ -1968,23 +1996,28 @@ Evme.Brain = new function Evme_Brain() {
 
         this.cancelRequests = function cancelRequests() {
             cancelSearch();
+            cancelAutocomplete();
 
             Searcher.clearTimeoutForShowingDefaultImage();
             window.clearTimeout(timeoutSearchImageWhileTyping);
-            requestImage && requestImage.abort();
-
-            requestIcons && requestIcons.abort();
+            requestImage && requestImage.abort && requestImage.abort();
+            requestImage = null;
+            
+            requestIcons && requestIcons.abort && requestIcons.abort();
+            requestIcons = null;
         };
 
         function cancelSearch() {
             window.clearTimeout(timeoutSearchWhileTyping);
             window.clearTimeout(timeoutSearch);
-            requestSearch && requestSearch.abort();
+            requestSearch && requestSearch.abort && requestSearch.abort();
+            requestSearch = null;
         };
 
         function cancelAutocomplete() {
-            requestAutocomplete && requestAutocomplete.abort();
             window.clearTimeout(timeoutAutocomplete);
+            requestAutocomplete && requestAutocomplete.abort && requestAutocomplete.abort();
+            requestAutocomplete = null;
         };
 
         this.setLastQuery = function setLastQuery() {
